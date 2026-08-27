@@ -38,6 +38,12 @@ public class MoveMessage
     public float Y { get; set; }
 }
 
+public class SceneChangeRequestMessage
+{
+    public string Type { get; set; }
+    public string SceneName { get; set; }
+}
+
 #endregion
 
 #region 서버 -> 클라이언트 (S2C)

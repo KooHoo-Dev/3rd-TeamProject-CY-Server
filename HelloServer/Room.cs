@@ -128,7 +128,7 @@ public class Room
             
             if(kind?.Type == "move") HandleMove(member, text);
             else if(kind?.Type == "chat") await HandleChatAsync(member, text);
-            else if(kind?.Type == "scene_change") await HandleSceneChangeAsync(member);
+            else if(kind?.Type == "scene_change_request") await HandleSceneChangeAsync(member, text);
             
             // 모르는 정보는 그냥 흘려버립니다.
             // Tip
@@ -168,13 +168,16 @@ public class Room
     }
     
     // 클라이언트 씬 전환 처리하는 함수
-    private async Task HandleSceneChangeAsync(Member member)
+    private async Task HandleSceneChangeAsync(Member member, string text)
     {
-        await BroadcastAsync(new
-        {
-            Type = "scene_change",
-            SceneName = "GameScene"
-        });
+        SceneChangeRequestMessage request =
+            JsonSerializer.Deserialize<SceneChangeRequestMessage>(text);
+
+        string sceneName = request?.SceneName?.Trim();
+
+        if (string.IsNullOrEmpty(sceneName)) return;
+
+        await BroadcastAsync(new SceneChangeMessage { SceneName = sceneName });
     }
 
     #endregion
