@@ -22,15 +22,21 @@ public class RoomHub
 
     private readonly int broadcastPerSecond;
     private readonly int logMovesPerSecond;
+    
+    private readonly double fuelFillSeconds;
+    private readonly float fuelSuccessMinPercent;
 
     private readonly object gate = new object();
 
     private int lastId;
 
-    public RoomHub(int broadcastPerSecond, int logMovesPerSecond)
+    public RoomHub(int broadcastPerSecond, int logMovesPerSecond, 
+        double fuelFillSeconds, float fuelSuccessMinPercent)
     {
         this.broadcastPerSecond = broadcastPerSecond;
         this.logMovesPerSecond = logMovesPerSecond;
+        this.fuelFillSeconds = fuelFillSeconds;
+        this.fuelSuccessMinPercent = fuelSuccessMinPercent;
     }
 
     #region 방 관리 함수들(찾기, 지우기)
@@ -56,7 +62,8 @@ public class RoomHub
             if (rooms.TryGetValue(code, out Entry entry) == false)
             {
                 entry = new Entry()
-                    {Room = new Room(code, logMovesPerSecond), Users = 0};
+                    {Room = new Room(code, logMovesPerSecond, 
+                        fuelFillSeconds, fuelSuccessMinPercent), Users = 0};
                 rooms.Add(code, entry);
                 Console.WriteLine($"[{code}] 방을 열었다. 총 방의 개수 : {rooms.Count}");
             }
@@ -145,6 +152,7 @@ public class RoomHub
                 {
                     // 상태정보 보내는 Task를 가져와서 sending에 추가해준다.
                     sending.Add(room.BroadcastStateAsync());
+                    sending.Add(room.UpdateMinigameAsync());
                 }
                 
                 await Task.WhenAll(sending);

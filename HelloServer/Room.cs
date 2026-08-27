@@ -2,6 +2,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using HelloServer.MiniGames;
 
 namespace HelloServer;
 
@@ -59,13 +60,20 @@ public class Room
     private readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
     private readonly string code; // 방번호
     private readonly int logMovesPerSecond; // 룸허브를 통해서 전달 받습니다. 
-
+    private readonly MiniGameSession miniGameSession;
+    
     public bool IsEmpty => members.IsEmpty;
     
-    public Room(string code, int logMovesPerSecond)
+    public Room(string code, int logMovesPerSecond, 
+        double fuelFillSeconds, float fuelSuccessMinPercent)
     {
         this.code = code;
         this.logMovesPerSecond = logMovesPerSecond;
+         
+        miniGameSession = new MiniGameSession(
+            () => members.Keys.ToArray(),
+            message => BroadcastAsync(message),
+            fuelFillSeconds, fuelSuccessMinPercent);
     }
 
     #region 듣기
@@ -126,6 +134,11 @@ public class Room
             // (타입이랑 매개변수로 텍스트만 넘기면 알아서 잘 처리해줍니다)
             TypeOnly kind = JsonSerializer.Deserialize<TypeOnly>(text);
             
+            if (kind?.Type == null) continue;
+
+            bool handledByMiniGame = await miniGameSession.TryHandleAsync(kind.Type, member.User.Id, text);
+            if (handledByMiniGame) continue;
+            
             if(kind?.Type == "move") HandleMove(member, text);
             else if(kind?.Type == "chat") await HandleChatAsync(member, text);
             else if(kind?.Type == "scene_change_request") await HandleSceneChangeAsync(member, text);
@@ -176,7 +189,8 @@ public class Room
         string sceneName = request?.SceneName?.Trim();
 
         if (string.IsNullOrEmpty(sceneName)) return;
-
+        
+        await miniGameSession.ResetForSceneChangeAsync();
         await BroadcastAsync(new SceneChangeMessage { SceneName = sceneName });
     }
 
@@ -263,6 +277,11 @@ public class Room
         await BroadcastAsync(new StateMessage() { States = states.ToArray() });
     }
     
+    public Task UpdateMinigameAsync()
+    {
+        return miniGameSession.UpdateAsync();
+    }
+    
     #endregion
 
     #region 들어오기, 나가기
@@ -346,6 +365,7 @@ public class Room
             members.TryRemove(member.User.Id, out _);
             // 퇴장한것을 알려줍니다.
             await BroadcastAsync(new LeaveMessage { Id = member.User.Id }, member.User.Id);
+            await miniGameSession.OnMemberLeftAsync(member.User.Id);
         }
         finally
         {
