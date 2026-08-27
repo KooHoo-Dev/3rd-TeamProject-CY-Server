@@ -128,6 +128,7 @@ public class Room
             
             if(kind?.Type == "move") HandleMove(member, text);
             else if(kind?.Type == "chat") await HandleChatAsync(member, text);
+            else if(kind?.Type == "scene_change") await HandleSceneChangeAsync(member);
             
             // 모르는 정보는 그냥 흘려버립니다.
             // Tip
@@ -164,6 +165,16 @@ public class Room
         // (서버) -> (다른 클라이언트) 들에게 보낸다
         // 받은 객체를 그대로 보낸다.
         await BroadcastAsync(chat);
+    }
+    
+    // 클라이언트 씬 전환 처리하는 함수
+    private async Task HandleSceneChangeAsync(Member member)
+    {
+        await BroadcastAsync(new
+        {
+            Type = "scene_change",
+            SceneName = "GameScene"
+        });
     }
 
     #endregion
@@ -224,7 +235,7 @@ public class Room
     {
         return SendRawAsync(member, JsonSerializer.Serialize(message, message.GetType()));
     }
-
+    
     // 지금 이 방의 사람들 위치를 한번씩 뿌린다.
     // 언제 뿌릴지는 RoomHub에서 정한다.
     public async Task BroadcastStateAsync()

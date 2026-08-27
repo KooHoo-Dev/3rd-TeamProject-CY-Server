@@ -78,4 +78,10 @@ public class StateMessage
     public PlayerState[] States { get; set; }
 }
 
+public class SceneChangeMessage
+{
+    public string Type { get; set; } = "scene_change";
+    public string SceneName { get; set; }
+}
+
 #endregion
