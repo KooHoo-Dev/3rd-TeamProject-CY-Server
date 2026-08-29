@@ -60,7 +60,9 @@ public class Room
     private readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
     private readonly string code; // 방번호
     private readonly int logMovesPerSecond; // 룸허브를 통해서 전달 받습니다. 
+    
     private readonly MiniGameSession miniGameSession;
+    private readonly VehicleSession vehicleSession;
     
     public bool IsEmpty => members.IsEmpty;
     
@@ -74,6 +76,8 @@ public class Room
             () => members.Keys.ToArray(),
             message => BroadcastAsync(message),
             fuelFillSeconds, fuelSuccessMinPercent);
+
+        vehicleSession = new VehicleSession(message => BroadcastAsync(message));
     }
 
     #region 듣기
@@ -138,6 +142,9 @@ public class Room
 
             bool handledByMiniGame = await miniGameSession.TryHandleAsync(kind.Type, member.User.Id, text);
             if (handledByMiniGame) continue;
+
+            bool handledByVehicle = await vehicleSession.TryHandleAsync(kind.Type, member.User.Id, text);
+            if (handledByVehicle) continue;
             
             if(kind?.Type == "move") HandleMove(member, text);
             else if(kind?.Type == "chat") await HandleChatAsync(member, text);
