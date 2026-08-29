@@ -428,7 +428,7 @@ public class Room
         Console.WriteLine(
             $"[{code}] 받음 {member.User.NickName}({member.User.Id}) " +
             $"({member.X,7:F2}, {member.Y,7:F2})  " +
-            $"지난 {gap.TotalSeconds:F1}초에 {member.MovesSinceLog}번{claimed} 아하하하!!!");
+            $"지난 {gap.TotalSeconds:F1}초에 {member.MovesSinceLog}번{claimed}");
 
         member.MovesSinceLog = 0;
         member.LastLogAt = DateTime.Now;
