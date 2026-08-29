@@ -419,7 +419,7 @@ public class Room
         if (logMovesPerSecond <= 0) return;
 
         TimeSpan gap = DateTime.Now - member.LastLogAt;
-        if (gap.TotalSeconds < 1.0 / logMovesPerSecond) return;
+        if (gap.TotalSeconds < 5.0 / logMovesPerSecond) return;
 
         // 보낸 쪽이 적은 번호가 서버가 아는 번호와 다르면 그대로 드러내 준다.
         // 평소에는 같으므로 아무것도 붙지 않는다.
