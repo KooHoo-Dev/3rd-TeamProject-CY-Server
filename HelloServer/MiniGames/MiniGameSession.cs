@@ -5,10 +5,12 @@ namespace HelloServer.MiniGames;
 public class MiniGameSession
 {
     private const string FuelMiniGameType = "fuel";
+    private const string BarricadeMiniGameType = "barricade";
     private const float FuelSuccessMaxPercent = 100f;
 
-    private static readonly TimeSpan FuelCompletionDelay = TimeSpan.FromSeconds(2);
-
+    private static readonly TimeSpan MiniGameCompletionDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan BarricadeCoolDown = TimeSpan.FromSeconds(2);
+    
     private enum FuelPhase
     {
         Ready,
@@ -31,6 +33,13 @@ public class MiniGameSession
     private string fuelOperatorId;
     private FuelPhase fuelPhase;
     private DateTime fuelPressedAt;
+
+    private string barricadeOperatorId;
+    private int[] barricadeCorrectSequence;
+    private int barricadeCurrentStep;
+    private DateTime barricadeCoolDownUntil;
+    private bool barricadeCompleted;
+    
 
     public MiniGameSession(Func<string[]> getMemberIds, Func<object, Task> broadcastAsync,
         double fuelFillSeconds, float fuelSuccessMinPercent)
@@ -56,6 +65,9 @@ public class MiniGameSession
                 return true;
             case "fuel_release":
                 await HandleFuelReleaseAsync(userId);
+                return true;
+            case "barricade_fuse_click":
+                await HandleBarricadeFuseClickAsync(userId, json);
                 return true;
             default:
                 return false;
@@ -160,7 +172,8 @@ public class MiniGameSession
 
         string miniGameType = request?.MiniGameType?.Trim()?.ToLowerInvariant();
 
-        if (miniGameType != FuelMiniGameType) return;
+        if (miniGameType != FuelMiniGameType 
+            && miniGameType != BarricadeMiniGameType) return;
 
         await gate.WaitAsync();
 
@@ -184,8 +197,8 @@ public class MiniGameSession
         if (currentMiniGameType != null)
             return;
 
-        if (pendingMiniGameType != FuelMiniGameType)
-            return;
+        if (pendingMiniGameType != FuelMiniGameType
+            && pendingMiniGameType != BarricadeMiniGameType) return;
 
         string[] memberIds = getMemberIds();
 
@@ -203,10 +216,17 @@ public class MiniGameSession
         currentMiniGameType = FuelMiniGameType;
         pendingMiniGameType = null;
 
-        fuelOperatorId = operatorId;
-        fuelPhase = FuelPhase.Ready;
-        fuelPressedAt = default;
-
+        if (currentMiniGameType == FuelMiniGameType)
+        {
+            fuelOperatorId = operatorId;
+            fuelPhase = FuelPhase.Ready;
+            fuelPressedAt = default;
+        }
+        else if (currentMiniGameType == BarricadeMiniGameType)
+        {
+            InitializeBarricade(operatorId);
+        }
+        
         await broadcastAsync(new MinigameStartedMessage
         {
             MiniGameType = FuelMiniGameType,
@@ -289,9 +309,61 @@ public class MiniGameSession
         }
     }
 
+    private async Task HandleBarricadeFuseClickAsync(string userId, string json)
+    {
+        BarricadeFuseClickMessage message = 
+            JsonSerializer.Deserialize<BarricadeFuseClickMessage>(json);
+        
+        await gate.WaitAsync();
+
+        try
+        {
+            if (currentMiniGameType != BarricadeMiniGameType) return;
+            if (barricadeOperatorId != userId) return;
+            if (barricadeCompleted) return;
+            if (DateTime.UtcNow < barricadeCoolDownUntil) return;
+
+            if (message.FuseIndex != barricadeCorrectSequence[barricadeCurrentStep])
+            {
+                barricadeCurrentStep = 0;
+                barricadeCoolDownUntil = DateTime.UtcNow + BarricadeCoolDown;
+
+                await broadcastAsync(new TypeOnly
+                {
+                    Type = "barricade_attempt_failed"
+                });
+
+                return;
+            }
+
+            int fuseIndex = message.FuseIndex;
+            barricadeCurrentStep++;
+
+            await broadcastAsync(new BarriacdeProgressMessage
+            {
+                FuseIndex = fuseIndex
+            });
+
+            if (barricadeCurrentStep < barricadeCorrectSequence.Length) return;
+            
+            barricadeCompleted = true;
+
+            await broadcastAsync(new TypeOnly
+            {
+                Type = "barricade_completed"
+            });
+
+            _ = FinishBarricadeAfterDelayAsync();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+    
     private async Task FinishFuelAfterDelayAsync()
     {
-        await Task.Delay(FuelCompletionDelay);
+        await Task.Delay(MiniGameCompletionDelay);
 
         await gate.WaitAsync();
 
@@ -311,6 +383,24 @@ public class MiniGameSession
         }
     }
 
+    private async Task FinishBarricadeAfterDelayAsync()
+    {
+        await Task.Delay(MiniGameCompletionDelay);
+        await gate.WaitAsync();
+
+        try
+        {
+            if (currentMiniGameType != BarricadeMiniGameType) return;
+            if (barricadeCompleted == false) return;
+
+            ResetActiveMiniGame();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+    
     private float CalculateGaugePercent()
     {
         TimeSpan elapsed = DateTime.UtcNow - fuelPressedAt;
@@ -327,6 +417,37 @@ public class MiniGameSession
         fuelPressedAt = default;
     }
 
+    private void InitializeBarricade(string operatorId)
+    {
+        barricadeOperatorId = operatorId;
+        barricadeCorrectSequence = new[] { 0, 1, 2 };
+
+        for (int index = barricadeCorrectSequence.Length - 1;
+             index > 0;
+             index--)
+        {
+            int swapIndex = Random.Shared.Next(index + 1);
+
+            (barricadeCorrectSequence[index],
+                    barricadeCorrectSequence[swapIndex]) =
+                (barricadeCorrectSequence[swapIndex],
+                    barricadeCorrectSequence[index]);
+        }
+
+        barricadeCurrentStep = 0;
+        barricadeCoolDownUntil = default;
+        barricadeCompleted = false;
+    }
+
+    private void ResetBarricade()
+    {
+        barricadeOperatorId = null;
+        barricadeCorrectSequence = null;
+        barricadeCurrentStep = 0;
+        barricadeCoolDownUntil = default;
+        barricadeCompleted = false;
+    }
+    
     private void ResetActiveMiniGame()
     {
         pendingMiniGameType = null;
@@ -335,5 +456,7 @@ public class MiniGameSession
         fuelOperatorId = null;
         fuelPhase = FuelPhase.Ready;
         fuelPressedAt = default;
+        
+        ResetBarricade();
     }
 }

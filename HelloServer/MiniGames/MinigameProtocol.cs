@@ -13,6 +13,12 @@ public class MinigameStartRequestMessage
     public string MiniGameType { get; set; }
 }
 
+public class BarricadeFuseClickMessage
+{
+    public string Type { get; set; } = "barricade_fuse_click";
+    public int FuseIndex { get; set; }
+}
+
 #endregion
 
 #region 서버 -> 클라이언트 (S2C)
@@ -29,6 +35,12 @@ public class FuelStateMessage
     public string Type { get; set; } = "fuel_state";
     public float GaugePercent { get; set; }
     public bool IsPressed { get; set; }
+}
+
+public class BarriacdeProgressMessage
+{
+    public string Type { get; set; } = "barriacde_progress";
+    public int FuseIndex { get; set; }
 }
 
 #endregion
