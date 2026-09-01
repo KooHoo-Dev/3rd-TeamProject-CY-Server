@@ -213,7 +213,7 @@ public class MiniGameSession
 
         string operatorId = memberIds[Random.Shared.Next(memberIds.Length)];
 
-        currentMiniGameType = FuelMiniGameType;
+        currentMiniGameType = pendingMiniGameType;
         pendingMiniGameType = null;
 
         if (currentMiniGameType == FuelMiniGameType)
@@ -229,8 +229,8 @@ public class MiniGameSession
         
         await broadcastAsync(new MinigameStartedMessage
         {
-            MiniGameType = FuelMiniGameType,
-            OperatorId = fuelOperatorId
+            MiniGameType = currentMiniGameType,
+            OperatorId = operatorId
         });
     }
     private async Task HandleFuelPressAsync(string userId)
@@ -339,7 +339,7 @@ public class MiniGameSession
             int fuseIndex = message.FuseIndex;
             barricadeCurrentStep++;
 
-            await broadcastAsync(new BarriacdeProgressMessage
+            await broadcastAsync(new BarricadeProgressMessage
             {
                 FuseIndex = fuseIndex
             });

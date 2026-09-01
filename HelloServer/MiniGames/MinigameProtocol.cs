@@ -37,9 +37,9 @@ public class FuelStateMessage
     public bool IsPressed { get; set; }
 }
 
-public class BarriacdeProgressMessage
+public class BarricadeProgressMessage
 {
-    public string Type { get; set; } = "barriacde_progress";
+    public string Type { get; set; } = "barricade_progress";
     public int FuseIndex { get; set; }
 }
 
