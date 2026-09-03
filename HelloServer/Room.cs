@@ -130,12 +130,6 @@ public class Room
             // text가 비어있으면 닫았다는 뜻
             if (string.IsNullOrEmpty(text)) return;
 
-            // 아래부터는 Json 텍스트 처리가 된다.
-            // 분기에 따라 알맞은 처리 함수를 선택하여 실행해 준다.
-            // JsonSerializer?
-            // C#에서 Json의 직렬화, 역직렬화를 담당하는 클래스 입니다.
-            // Unity와 C#에서 사용하는 직렬화 클래스가 다른것에 유의하세여
-            // (타입이랑 매개변수로 텍스트만 넘기면 알아서 잘 처리해줍니다)
             TypeOnly kind = JsonSerializer.Deserialize<TypeOnly>(text);
             
             if (kind?.Type == null) continue;
@@ -146,14 +140,10 @@ public class Room
             bool handledByVehicle = await vehicleSession.TryHandleAsync(kind.Type, member.User.Id, text);
             if (handledByVehicle) continue;
             
-            if(kind?.Type == "move") HandleMove(member, text);
-            else if(kind?.Type == "chat") await HandleChatAsync(member, text);
-            else if(kind?.Type == "scene_change_request") await HandleSceneChangeAsync(member, text);
-            
-            // 모르는 정보는 그냥 흘려버립니다.
-            // Tip
-            // : 여기 부분에 여러분이 넣고싶은 커스텀한 함수를 처리하는
-            // 구간을 만들면 되겠죠?   
+            if (kind?.Type == "move") HandleMove(member, text);
+            else if (kind?.Type == "chat") await HandleChatAsync(member, text);
+            else if (kind?.Type == "scene_change_request") await HandleSceneChangeAsync(member, text);
+            else if (kind?.Type == "round_state") await HandleRoundStateAsync(text);
         }
     }
 
@@ -201,6 +191,16 @@ public class Room
         await BroadcastAsync(new SceneChangeMessage { SceneName = sceneName });
     }
 
+    private async Task HandleRoundStateAsync(string text)
+    {
+        RoundStateMessage message =
+            JsonSerializer.Deserialize<RoundStateMessage>(text);
+
+        if (message == null) return;
+
+        await BroadcastAsync(message);
+    }
+    
     #endregion
 
     #region 뿌리기
