@@ -6,6 +6,7 @@ public class MiniGameSession
 {
     private const string FuelMiniGameType = "fuel";
     private const string BarricadeMiniGameType = "barricade";
+    private const string LicensePlateMiniGameType = "license_plate";
     private const float FuelSuccessMaxPercent = 100f;
 
     private static readonly TimeSpan MiniGameCompletionDelay = TimeSpan.FromSeconds(2);
@@ -15,6 +16,15 @@ public class MiniGameSession
     {
         Ready,
         Fueling,
+        Completed
+    }
+    
+    private enum LicensePlatePhase
+    {
+        RemoveOldScrews,
+        DiscardOldPlate,
+        AttachNewPlate,
+        FastenNewScrews,
         Completed
     }
     
@@ -40,6 +50,9 @@ public class MiniGameSession
     private DateTime barricadeCoolDownUntil;
     private bool barricadeCompleted;
     
+    private string licensePlateOperatorId;
+    private LicensePlatePhase licensePlatePhase;
+    private readonly HashSet<int> licensePlateScrews = new();
 
     public MiniGameSession(Func<string[]> getMemberIds, Func<object, Task> broadcastAsync,
         double fuelFillSeconds, float fuelSuccessMinPercent)
@@ -68,6 +81,12 @@ public class MiniGameSession
                 return true;
             case "barricade_fuse_click":
                 await HandleBarricadeFuseClickAsync(userId, json);
+                return true;
+            case "license_plate_remove_old_screw":
+            case "license_plate_fasten_new_screw":
+            case "license_plate_drag":
+            case "license_plate_drop":
+                await HandleLicensePlateAsync(type, userId, json);
                 return true;
             default:
                 return false;
@@ -172,9 +191,10 @@ public class MiniGameSession
 
         string miniGameType = request?.MiniGameType?.Trim()?.ToLowerInvariant();
 
-        if (miniGameType != FuelMiniGameType 
-            && miniGameType != BarricadeMiniGameType) return;
-
+        if (miniGameType != FuelMiniGameType
+            && miniGameType != BarricadeMiniGameType
+            && miniGameType != LicensePlateMiniGameType) return;
+        
         await gate.WaitAsync();
 
         try
@@ -198,8 +218,9 @@ public class MiniGameSession
             return;
 
         if (pendingMiniGameType != FuelMiniGameType
-            && pendingMiniGameType != BarricadeMiniGameType) return;
-
+            && pendingMiniGameType != BarricadeMiniGameType
+            && pendingMiniGameType != LicensePlateMiniGameType) return;
+        
         string[] memberIds = getMemberIds();
 
         if (memberIds.Length == 0)
@@ -225,6 +246,12 @@ public class MiniGameSession
         else if (currentMiniGameType == BarricadeMiniGameType)
         {
             InitializeBarricade(operatorId);
+        }
+        else if (currentMiniGameType == LicensePlateMiniGameType)
+        {
+            licensePlateOperatorId = operatorId;
+            licensePlatePhase = LicensePlatePhase.RemoveOldScrews;
+            licensePlateScrews.Clear();
         }
         
         await broadcastAsync(new MinigameStartedMessage
@@ -361,6 +388,151 @@ public class MiniGameSession
         }
     }
     
+    private async Task HandleLicensePlateAsync(string type, string userId, string json)
+    {
+        await gate.WaitAsync();
+
+        try
+        {
+            if (currentMiniGameType != LicensePlateMiniGameType) return;
+            if (licensePlateOperatorId != userId) return;
+            if (licensePlatePhase == LicensePlatePhase.Completed) return;
+
+            switch (type)
+            {
+                case "license_plate_remove_old_screw":
+                case "license_plate_fasten_new_screw":
+                {
+                    LicensePlateScrewMessage message =
+                        JsonSerializer.Deserialize<LicensePlateScrewMessage>(json);
+
+                    await HandleLicensePlateScrewAsync(
+                        message.ScrewIndex, type == "license_plate_remove_old_screw");
+                    break;
+                }
+                case "license_plate_drag":
+                {
+                    LicensePlateDragMessage message =
+                        JsonSerializer.Deserialize<LicensePlateDragMessage>(json);
+
+                    if (!CanMoveLicensePlate(message.IsOldPlate)) return;
+
+                    await broadcastAsync(message);
+                    break;
+                }
+                case "license_plate_drop":
+                {
+                    LicensePlateDropMessage message =
+                        JsonSerializer.Deserialize<LicensePlateDropMessage>(json);
+
+                    await HandleLicensePlateDropAsync(message);
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task HandleLicensePlateScrewAsync(
+        int screwIndex, bool isOldPlate)
+    {
+        LicensePlatePhase expectedPhase = isOldPlate
+            ? LicensePlatePhase.RemoveOldScrews
+            : LicensePlatePhase.FastenNewScrews;
+
+        if (licensePlatePhase != expectedPhase) return;
+        if (screwIndex < 0 || screwIndex >= 4) return;
+        if (!licensePlateScrews.Add(screwIndex)) return;
+
+        await broadcastAsync(new LicensePlateScrewMessage
+        {
+            Type = isOldPlate 
+                ? "license_plate_old_screw_removed"
+                : "license_plate_new_screw_fastened",
+            ScrewIndex = screwIndex
+        });
+
+        if (licensePlateScrews.Count < 4) return;
+
+        if (isOldPlate)
+        {
+            licensePlatePhase = LicensePlatePhase.DiscardOldPlate;
+            return;
+        }
+
+        licensePlatePhase = LicensePlatePhase.Completed;
+
+        await broadcastAsync(new TypeOnly
+        {
+            Type = "license_plate_completed"
+        });
+
+        _ = FinishLicensePlateAfterDelayAsync();
+    }
+
+    private bool CanMoveLicensePlate(bool isOldPlate)
+    {
+        return isOldPlate
+            ? licensePlatePhase == LicensePlatePhase.DiscardOldPlate
+            : licensePlatePhase == LicensePlatePhase.AttachNewPlate;
+    }
+
+    private async Task HandleLicensePlateDropAsync(
+        LicensePlateDropMessage message)
+    {
+        if (CanMoveLicensePlate(message.IsOldPlate) == false) return;
+
+        if (message.IsValidDrop == false)
+        {
+            await broadcastAsync(new LicensePlateDropResultMessage
+            {
+                IsOldPlate = message.IsOldPlate
+            });
+            return;
+        }
+
+        if (message.IsOldPlate)
+        {
+            licensePlatePhase = LicensePlatePhase.AttachNewPlate;
+
+            await broadcastAsync(new TypeOnly
+            {
+                Type = "license_plate_old_plate_discarded"
+            });
+        }
+        else
+        {
+            licensePlatePhase = LicensePlatePhase.FastenNewScrews;
+            licensePlateScrews.Clear();
+
+            await broadcastAsync(new TypeOnly
+            {
+                Type = "license_plate_new_plate_attached"
+            });
+        }
+    }
+
+    private async Task FinishLicensePlateAfterDelayAsync()
+    {
+        await Task.Delay(MiniGameCompletionDelay);
+        await gate.WaitAsync();
+
+        try
+        {
+            if (currentMiniGameType != LicensePlateMiniGameType) return;
+            if (licensePlatePhase != LicensePlatePhase.Completed) return;
+
+            ResetActiveMiniGame();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+    
     private async Task FinishFuelAfterDelayAsync()
     {
         await Task.Delay(MiniGameCompletionDelay);
@@ -369,11 +541,8 @@ public class MiniGameSession
 
         try
         {
-            if (currentMiniGameType != FuelMiniGameType)
-                return;
-
-            if (fuelPhase != FuelPhase.Completed)
-                return;
+            if (currentMiniGameType != FuelMiniGameType) return;
+            if (fuelPhase != FuelPhase.Completed) return;
 
             ResetActiveMiniGame();
         }
@@ -452,10 +621,14 @@ public class MiniGameSession
     {
         pendingMiniGameType = null;
         currentMiniGameType = null;
-
+        
         fuelOperatorId = null;
         fuelPhase = FuelPhase.Ready;
         fuelPressedAt = default;
+        
+        licensePlateOperatorId = null;
+        licensePlatePhase = LicensePlatePhase.RemoveOldScrews;
+        licensePlateScrews.Clear();
         
         ResetBarricade();
     }
