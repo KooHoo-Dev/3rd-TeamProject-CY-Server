@@ -4,7 +4,7 @@ public class RoundStateMessage
 {
     public string Type { get; set; } = "round_state";
     
-    public float RemainingTime { get; set; }
+    public float ElapsedTime { get; set; }
     public float DurabilityRatio { get; set; }
     public float SpeedRatio { get; set; }
     public int Cleared { get; set; }
