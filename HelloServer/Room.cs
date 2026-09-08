@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using HelloServer.MiniGames;
+using HelloServer.Traffic;
 
 namespace HelloServer;
 
@@ -145,6 +146,7 @@ public class Room
             else if (kind?.Type == "chat") await HandleChatAsync(member, text);
             else if (kind?.Type == "scene_change_request") await HandleSceneChangeAsync(member, text);
             else if (kind?.Type == "round_state") await HandleRoundStateAsync(text);
+            else if (kind?.Type == "traffic_state") await HandleTrafficStateAsync(text);
         }
     }
 
@@ -201,6 +203,17 @@ public class Room
             JsonSerializer.Deserialize<RoundStateMessage>(text);
 
         if (message == null) return;
+
+        await BroadcastAsync(message);
+    }
+    
+    private async Task HandleTrafficStateAsync(string text)
+    {
+        TrafficStateMessage message =
+            JsonSerializer.Deserialize<TrafficStateMessage>(text);
+
+        if (message == null)
+            return;
 
         await BroadcastAsync(message);
     }
