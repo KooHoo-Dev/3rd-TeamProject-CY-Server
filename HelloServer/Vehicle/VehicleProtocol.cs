@@ -17,14 +17,13 @@ public class VehicleInputMessage
 public class VehicleStateMessage
 {
     public string Type { get; set; } = "vehicle_state";
-
     public string UserId { get; set; }
 
+    public int SceneVersion { get; set; }
+    
     public float PositionX { get; set; }
     public float PositionY { get; set; }
-
     public float Rotation { get; set; }
-
     public float VelocityX { get; set; }
     public float VelocityY { get; set; }
 }

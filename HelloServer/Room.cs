@@ -65,6 +65,7 @@ public class Room
     private readonly VehicleSession vehicleSession;
     
     public bool IsEmpty => members.IsEmpty;
+    private int sceneVersion;
     
     public Room(string code, int logMovesPerSecond, 
         double fuelFillSeconds, float fuelSuccessMinPercent)
@@ -187,8 +188,11 @@ public class Room
 
         if (string.IsNullOrEmpty(sceneName)) return;
         
+        sceneVersion++;
+        vehicleSession.SetSceneVersion(sceneVersion);        
+        
         await miniGameSession.ResetForSceneChangeAsync();
-        await BroadcastAsync(new SceneChangeMessage { SceneName = sceneName });
+        await BroadcastAsync(new SceneChangeMessage { SceneName = sceneName, SceneVersion = sceneVersion });
     }
 
     private async Task HandleRoundStateAsync(string text)

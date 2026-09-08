@@ -5,7 +5,8 @@ namespace HelloServer;
 public class VehicleSession
 {
     private readonly Func<object, Task> broadcastAsync;
-
+    private int sceneVersion;
+    
     public VehicleSession(Func<object, Task> broadcastAsync)
     {
         this.broadcastAsync = broadcastAsync;
@@ -26,6 +27,11 @@ public class VehicleSession
         }
     }
 
+    public void SetSceneVersion(int value)
+    {
+        sceneVersion = value;
+    }
+    
     private async Task HandleVehicleInputAsync(string userId, string json)
     {
         VehicleInputMessage message = JsonSerializer.Deserialize<VehicleInputMessage>(json);
@@ -49,6 +55,8 @@ public class VehicleSession
         if (message == null) return;
         if (IsValid(message) == false) return;
 
+        if (message.SceneVersion != sceneVersion) return;
+        
         message.UserId = userId;
 
         await broadcastAsync(message);
