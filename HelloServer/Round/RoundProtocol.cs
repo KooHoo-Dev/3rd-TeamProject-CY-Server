@@ -11,4 +11,5 @@ public class RoundStateMessage
     public int Total { get; set; }
     public string Phase { get; set; }
     public string Gear { get; set; }
+    public bool TutorialStopCompleted { get; set; }
 }
