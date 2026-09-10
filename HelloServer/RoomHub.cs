@@ -127,11 +127,11 @@ public class RoomHub
         // 타이머 클래스 입니다. TimeSpan(검색해보세여)으로 1초당 몇펀 broadcast할지 타이머를
         // 설정해 놨습니다.
 
-        try
-        {
             // 타이머가 종료되면 자동으로 false를 반환합니다.
             while (await timer.WaitForNextTickAsync(token))
             {
+        try
+        {
                 // 락을걸기전에 snapshot(복사본)이 들어갈
                 // list를 생성해놓는다
                 List<Room> snapshot = new List<Room>();
@@ -156,16 +156,21 @@ public class RoomHub
                 }
                 
                 await Task.WhenAll(sending);
-            }
         }
         catch (OperationCanceledException)
         {
             // 서버가 꺼지는 중.
+            break;
         }
         catch (Exception e)
         {
             Console.WriteLine($"[RoomHub] Exception: {e.Message}");
         }
+                
+
+            }
+        
+
     }
 
     // 방 코드를 정규화 하는 유틸 함수입니다.
