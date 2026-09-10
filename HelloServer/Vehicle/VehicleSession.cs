@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace HelloServer;
@@ -44,8 +45,16 @@ public class VehicleSession
         message.Accel = Math.Clamp(message.Accel, 0f, 1f);
         message.Brake = Math.Clamp(message.Brake, 0f, 1f);
         message.Gear = Math.Clamp(message.Gear, 0, 2);
-
+        
+        Stopwatch timer = Stopwatch.StartNew();
         await broadcastAsync(message);
+
+        if (timer.ElapsedMilliseconds >= 100)
+        {
+            Console.WriteLine(
+                $"[VEHICLE][BROADCAST SLOW] {DateTime.UtcNow:HH:mm:ss.fff} " +
+                $"type=vehicle_input from={userId} elapsed={timer.ElapsedMilliseconds}ms");
+        }
     }
 
     private async Task HandleVehicleStateAsync(string userId, string json)
@@ -55,11 +64,25 @@ public class VehicleSession
         if (message == null) return;
         if (IsValid(message) == false) return;
 
-        if (message.SceneVersion != sceneVersion) return;
+        if (message.SceneVersion != sceneVersion)
+        {
+            Console.WriteLine(
+                $"[VEHICLE][STATE DROP] from={userId} " +
+                $"messageVersion={message.SceneVersion} serverVersion={sceneVersion}");
+            return;
+        }
         
         message.UserId = userId;
 
+        Stopwatch timer = Stopwatch.StartNew();
         await broadcastAsync(message);
+
+        if (timer.ElapsedMilliseconds >= 100)
+        {
+            Console.WriteLine(
+                $"[VEHICLE][BROADCAST SLOW] {DateTime.UtcNow:HH:mm:ss.fff} " +
+                $"type=vehicle_state from={userId} elapsed={timer.ElapsedMilliseconds}ms");
+        }
     }
 
     private static bool IsValid(VehicleStateMessage message)
