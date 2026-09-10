@@ -249,14 +249,21 @@ public class Room
         // 소켓이 끊겨있는지 확인을 해준다. 보내기전에 마지막 체크
         if (member.Socket.State != WebSocketState.Open) return;
 
-         using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        
-        // 보내는 중인 메시지가 있다면 lock이 풀릴때까지 잠깐 기다린다.
-        // 그리고 내가 보낼 턴이면 잠궈버린다. 두가지를 동시에 수행합니다.
-        await member.SendLock.WaitAsync(cts.Token);
+        using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+        // 자물쇠를 잡았는지 기록해 둔다.
+        // 못 잡고 finally 로 가면 안 잡은 자물쇠를 반납하게 되어 세마포어 개수가 망가진다.
+        bool lockTaken = false;
 
         try
         {
+            // 보내는 중인 메시지가 있다면 lock이 풀릴때까지 잠깐 기다린다.
+            // 그리고 내가 보낼 턴이면 잠궈버린다. 두가지를 동시에 수행합니다.
+            // 기다리는 것도 try 안에 둔다. 밖에 두면 여기서 난 예외가 BroadcastAsync 를 타고
+            // RoomHub 의 틱 루프까지 올라가 루프가 통째로 끝나 버린다.
+            await member.SendLock.WaitAsync(cts.Token);
+            lockTaken = true;
+
             // 보낼때는 string이 아니라 byte배열로 바꿔준다
             byte[] bytes = Encoding.UTF8.GetBytes(json);
             await member.Socket.SendAsync(
@@ -264,7 +271,7 @@ public class Room
         }
         catch (OperationCanceledException) { member.Socket.Abort(); }   // 3초 넘으면 끊긴 사람이다
         catch (WebSocketException) { }
-        finally { member.SendLock.Release(); }
+        finally { if (lockTaken) member.SendLock.Release(); }
     }
 
     // 단순 호출용 유틸 함수
