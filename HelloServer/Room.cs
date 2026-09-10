@@ -237,7 +237,7 @@ public class Room
             // 제외 대상이라면 건너 뛴다
             if(member.User.Id == exceptId) continue;
             // 한명단위 메시지 Task를 만들어서 List에 넣어준다
-            sending.Add(SendRawAsync(member, json));
+            sending.Add((member, json));
         }
         
         await Task.WhenAll(sending);
@@ -248,17 +248,19 @@ public class Room
     {
         // 소켓이 끊겨있는지 확인을 해준다. 보내기전에 마지막 체크
         if (member.Socket.State != WebSocketState.Open) return;
+
+         using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         
         // 보내는 중인 메시지가 있다면 lock이 풀릴때까지 잠깐 기다린다.
         // 그리고 내가 보낼 턴이면 잠궈버린다. 두가지를 동시에 수행합니다.
-        await member.SendLock.WaitAsync();
+        await member.SendLock.WaitAsync(cts.Token);
 
         try
         {
             // 보낼때는 string이 아니라 byte배열로 바꿔준다
             byte[] bytes = Encoding.UTF8.GetBytes(json);
             await member.Socket.SendAsync(
-                bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+                bytes, WebSocketMessageType.Text, true, cts.Token);
         }
         catch (OperationCanceledException) { member.Socket.Abort(); }   // 3초 넘으면 끊긴 사람이다
         catch (WebSocketException) { }
