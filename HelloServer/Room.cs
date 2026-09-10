@@ -260,15 +260,9 @@ public class Room
             await member.Socket.SendAsync(
                 bytes, WebSocketMessageType.Text, true, CancellationToken.None);
         }
-        catch (WebSocketException)
-        {
-            // 보내는 순간 끊길 수 있음.
-            // 나가기 처리는 다른 곳에서 함.
-        }
-        finally // 예외가 발생하든 안하든 꼭 처리되는 finally 구문(찾아 보십쇼) 
-        {
-            member.SendLock.Release();
-        }
+        catch (OperationCanceledException) { member.Socket.Abort(); }   // 3초 넘으면 끊긴 사람이다
+        catch (WebSocketException) { }
+        finally { member.SendLock.Release(); }
     }
 
     // 단순 호출용 유틸 함수
