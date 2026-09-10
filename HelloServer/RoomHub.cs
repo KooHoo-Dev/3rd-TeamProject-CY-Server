@@ -157,7 +157,6 @@ public class RoomHub
                 
                 await Task.WhenAll(sending);
             }
-
         }
         catch (OperationCanceledException)
         {
