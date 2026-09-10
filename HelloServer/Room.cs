@@ -237,7 +237,7 @@ public class Room
             // 제외 대상이라면 건너 뛴다
             if(member.User.Id == exceptId) continue;
             // 한명단위 메시지 Task를 만들어서 List에 넣어준다
-            sending.Add((member, json));
+            sending.Add(SendRawAsync(member, json));
         }
         
         await Task.WhenAll(sending);
