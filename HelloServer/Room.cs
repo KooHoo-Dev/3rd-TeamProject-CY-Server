@@ -2,6 +2,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using HelloServer.MiniGames;
 using HelloServer.Traffic;
 
@@ -40,13 +41,20 @@ public class Room
         // 출력 서식을 따로 지정할 수 있습니다. 그거는 MS 홈페이지 가서 보세요
         public DateTime LastLogAt;
         
-        // 보낼때 여러메시지를 동시에 보내지 않기 위에
-        // 사람(멤버)마다 Gate를 하나씩 두고 한번에 하나씩 보내기 위해
-        // 사용하는 클래스. (비동기에서 lock처리가 안되서 사용)
-        // 읽는것은 여러 쓰레드에서 읽을 수 있는데 사용(Write)는
-        // 하나의 쓰레드에서만 온전히 돌아갈 수 있도록 하게 해주는 클래스
-        public readonly SemaphoreSlim SendLock 
-            = new SemaphoreSlim(1, 1);
+        // 이벤트는 순서대로, 실시간 상태는 종류별 최신값 하나만 보관한다.
+        // 실제 WebSocket 송신은 SendLoopAsync 한 곳에서만 수행한다.
+        public readonly Channel<string> Events = Channel.CreateBounded<string>(
+            new BoundedChannelOptions(32)
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = false
+            });
+        public readonly ConcurrentDictionary<string, string> LatestStates = new();
+        public readonly SemaphoreSlim OutboundSignal = new(0);
+        public readonly object OutboundGate = new();
+        public bool OutboundSignalPending;
+        public CancellationTokenSource SendCancellation;
     }
     
     // race condition이 일어나도 여러 쓰레드에서 동시적으로
@@ -223,54 +231,121 @@ public class Room
     #region 뿌리기
 
     // 메시지를 여러명한테 뿌리는 함수
-    private async Task BroadcastAsync(object message, string exceptId = null)
+    private Task BroadcastAsync(object message, string exceptId = null)
     {
         string json = JsonSerializer.Serialize(message, message.GetType());
-        
-        // 보낼 json객체를 미리 생성하고,
-        // 유저수에 맞게 보내는 작업을 처리한다.
-        List<Task> sending = new List<Task>();
+        string stateKey = GetStateKey(message);
 
-        // 딕셔너리에 있는 모든 멤버를 순회한다
         foreach (Member member in members.Values)
         {
-            // 제외 대상이라면 건너 뛴다
             if(member.User.Id == exceptId) continue;
-            // 한명단위 메시지 Task를 만들어서 List에 넣어준다
-            sending.Add(SendRawAsync(member, json));
+            QueueOutgoing(member, json, stateKey);
         }
-        
-        await Task.WhenAll(sending);
+
+        return Task.CompletedTask;
     }
 
-    // 한명의 User에게 메시지를 보내는 함수
-    private async Task SendRawAsync(Member member, string json)
+    private static string GetStateKey(object message)
     {
-        // 소켓이 끊겨있는지 확인을 해준다. 보내기전에 마지막 체크
+        return message switch
+        {
+            StateMessage => "state",
+            VehicleInputMessage input => $"vehicle_input:{input.UserId}",
+            VehicleStateMessage => "vehicle_state",
+            TrafficStateMessage => "traffic_state",
+            RoundStateMessage => "round_state",
+            FuelStateMessage => "fuel_state",
+            LicensePlateDragMessage drag => $"license_plate_drag:{drag.IsOldPlate}",
+            _ => null
+        };
+    }
+
+    private static void QueueOutgoing(Member member, string json, string stateKey)
+    {
         if (member.Socket.State != WebSocketState.Open) return;
 
-         using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        
-        // 보내는 중인 메시지가 있다면 lock이 풀릴때까지 잠깐 기다린다.
-        // 그리고 내가 보낼 턴이면 잠궈버린다. 두가지를 동시에 수행합니다.
-        await member.SendLock.WaitAsync(cts.Token);
+        if (stateKey != null)
+        {
+            member.LatestStates[stateKey] = json;
+        }
+        else if (member.Events.Writer.TryWrite(json) == false)
+        {
+            // 순서 보장 이벤트가 넘쳤다면 이 연결은 더 이상 정상적으로 복구할 수 없다.
+            member.Socket.Abort();
+            return;
+        }
 
+        bool signal;
+        lock (member.OutboundGate)
+        {
+            signal = member.OutboundSignalPending == false;
+            member.OutboundSignalPending = true;
+        }
+
+        if (signal) member.OutboundSignal.Release();
+    }
+
+    private static void StartSendLoop(Member member, CancellationToken token)
+    {
+        member.SendCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+        _ = SendLoopAsync(member, member.SendCancellation.Token);
+    }
+
+    private static async Task SendLoopAsync(Member member, CancellationToken token)
+    {
         try
         {
-            // 보낼때는 string이 아니라 byte배열로 바꿔준다
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            await member.Socket.SendAsync(
-                bytes, WebSocketMessageType.Text, true, cts.Token);
+            while (member.Socket.State == WebSocketState.Open)
+            {
+                await member.OutboundSignal.WaitAsync(token);
+                lock (member.OutboundGate)
+                    member.OutboundSignalPending = false;
+
+                while (member.Events.Reader.TryRead(out string eventJson))
+                    await SendRawAsync(member, eventJson, token);
+
+                foreach (string key in member.LatestStates.Keys)
+                {
+                    if (member.LatestStates.TryRemove(key, out string stateJson))
+                        await SendRawAsync(member, stateJson, token);
+                }
+            }
         }
-        catch (OperationCanceledException) { member.Socket.Abort(); }   // 3초 넘으면 끊긴 사람이다
-        catch (WebSocketException) { }
-        finally { member.SendLock.Release(); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // 정상적인 연결 종료 또는 서버 종료.
+        }
+        catch (OperationCanceledException)
+        {
+            member.Socket.Abort();
+        }
+        catch (WebSocketException)
+        {
+            member.Socket.Abort();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 연결이 정리되는 중이다.
+        }
+    }
+
+    private static async Task SendRawAsync(Member member, string json, CancellationToken token)
+    {
+        using CancellationTokenSource timeout =
+            CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(3));
+
+        byte[] bytes = Encoding.UTF8.GetBytes(json);
+        await member.Socket.SendAsync(
+            bytes, WebSocketMessageType.Text, true, timeout.Token);
     }
 
     // 단순 호출용 유틸 함수
     private Task SendAsync(Member member, object message)
     {
-        return SendRawAsync(member, JsonSerializer.Serialize(message, message.GetType()));
+        QueueOutgoing(member,
+            JsonSerializer.Serialize(message, message.GetType()), GetStateKey(message));
+        return Task.CompletedTask;
     }
     
     // 지금 이 방의 사람들 위치를 한번씩 뿌린다.
@@ -333,6 +408,7 @@ public class Room
         member.User = new User();
         member.User.Id = id;
         member.User.NickName = hello.NickName.Trim();
+        StartSendLoop(member, token);
         
         // 들어오고 나가는 일은 한사람에 한명씩 해야합니다.
         // 사람이 들어오면 현재 방에 있는 멤버들에게도 메시지를 보내줘야겠죠?
@@ -383,6 +459,7 @@ public class Room
         try
         {
             members.TryRemove(member.User.Id, out _);
+            member.SendCancellation.Cancel();
             // 퇴장한것을 알려줍니다.
             await BroadcastAsync(new LeaveMessage { Id = member.User.Id }, member.User.Id);
             await miniGameSession.OnMemberLeftAsync(member.User.Id);
