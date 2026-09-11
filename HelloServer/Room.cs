@@ -166,7 +166,7 @@ public class Room
             bool handledByMiniGame = await miniGameSession.TryHandleAsync(kind.Type, member.User.Id, text);
             if (handledByMiniGame) continue;
 
-            bool handledByVehicle = await vehicleSession.TryHandleAsync(kind.Type, member.User.Id, text);
+            bool handledByVehicle = vehicleSession.TryHandle(kind.Type, member.User.Id, text);
             if (handledByVehicle) continue;
             
             if (kind?.Type == "move") HandleMove(member, text);
