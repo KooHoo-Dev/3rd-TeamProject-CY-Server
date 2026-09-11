@@ -151,6 +151,18 @@ public class Room
             
             if (kind?.Type == null) continue;
 
+            if (kind.Type == "round_state")
+            {
+                HandleRoundState(text);
+                continue;
+            }
+
+            if (kind.Type == "traffic_state")
+            {
+                HandleTrafficState(text);
+                continue;
+            }
+            
             bool handledByMiniGame = await miniGameSession.TryHandleAsync(kind.Type, member.User.Id, text);
             if (handledByMiniGame) continue;
 
@@ -160,8 +172,6 @@ public class Room
             if (kind?.Type == "move") HandleMove(member, text);
             else if (kind?.Type == "chat") await HandleChatAsync(member, text);
             else if (kind?.Type == "scene_change_request") await HandleSceneChangeAsync(member, text);
-            else if (kind?.Type == "round_state") await HandleRoundStateAsync(text);
-            else if (kind?.Type == "traffic_state") await HandleTrafficStateAsync(text);
         }
     }
 
@@ -212,17 +222,18 @@ public class Room
         await BroadcastAsync(new SceneChangeMessage { SceneName = sceneName, SceneVersion = sceneVersion });
     }
 
-    private async Task HandleRoundStateAsync(string text)
+    private void HandleRoundState(string text)
     {
         RoundStateMessage message =
             JsonSerializer.Deserialize<RoundStateMessage>(text);
 
-        if (message == null) return;
+        if (message == null)
+            return;
 
-        await BroadcastAsync(message);
+        QueueBroadcast(message);
     }
     
-    private async Task HandleTrafficStateAsync(string text)
+    private void HandleTrafficState(string text)
     {
         TrafficStateMessage message =
             JsonSerializer.Deserialize<TrafficStateMessage>(text);
@@ -230,31 +241,33 @@ public class Room
         if (message == null)
             return;
 
-        await BroadcastAsync(message);
+        QueueBroadcast(message);
     }
     
     #endregion
 
     #region 뿌리기
 
-    // 메시지를 여러명한테 뿌리는 함수
-    private Task BroadcastAsync(object message, string exceptId = null)
+    private void QueueBroadcast(object message, string exceptId = null)
     {
         string json = JsonSerializer.Serialize(message, message.GetType());
         string stateKey = GetRealtimeStateKey(message);
-        
-        // 딕셔너리에 있는 모든 멤버를 순회한다
+
         foreach (Member member in members.Values)
         {
-            // 제외 대상이라면 건너 뛴다
-            if(member.User.Id == exceptId) continue;
-            
+            if (member.User.Id == exceptId)
+                continue;
+
             QueueOutgoing(member, json, stateKey);
         }
-
+    }
+    
+    private Task BroadcastAsync(object message, string exceptId = null)
+    {
+        QueueBroadcast(message, exceptId);
         return Task.CompletedTask;
     }
-
+    
     private static string GetRealtimeStateKey(object message)
     {
         return message switch
