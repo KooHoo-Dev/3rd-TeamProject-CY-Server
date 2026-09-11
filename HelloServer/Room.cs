@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Threading.Channels;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -237,7 +238,7 @@ public class Room
     #region 뿌리기
 
     // 메시지를 여러명한테 뿌리는 함수
-    private async Task BroadcastAsync(object message, string exceptId = null)
+    private Task BroadcastAsync(object message, string exceptId = null)
     {
         string json = JsonSerializer.Serialize(message, message.GetType());
         string stateKey = GetRealtimeStateKey(message);
@@ -260,7 +261,7 @@ public class Room
         {
             StateMessage => "state",
             VehicleInputMessage input => $"vehicle_input:{input.UserId ?? string.Empty}",
-            VehicleInputMessage state => $"vehicle_state:{state.UserId ?? string.Empty}",
+            VehicleStateMessage state => $"vehicle_state:{state.UserId ?? string.Empty}",
 
             TrafficStateMessage => "traffic_state",
             RoundStateMessage => "round_state",
@@ -272,7 +273,7 @@ public class Room
         };
     }
 
-    private static void QueueOutGoing(Member member, string json, string stateKey)
+    private static void QueueOutgoing(Member member, string json, string stateKey)
     {
         if (member.Socket.State != WebSocketState.Open) return;
         if (stateKey != null)
@@ -359,10 +360,10 @@ public class Room
         // 소켓이 끊겨있는지 확인을 해준다. 보내기전에 마지막 체크
         if (member.Socket.State != WebSocketState.Open) return;
 
-        using CancellationTokenSource timeOut = 
+        using CancellationTokenSource timeout = 
             CancellationTokenSource.CreateLinkedTokenSource(connectionToken);
 
-        timeOut.CancelAfter(TimeSpan.FromSecond(3));
+        timeout.CancelAfter(TimeSpan.FromSeconds(3));
         
         // 느린 연결 하나가 영구히 송신 루프를 점유하지 못하게 한다.
         timeout.CancelAfter(TimeSpan.FromSeconds(3));
